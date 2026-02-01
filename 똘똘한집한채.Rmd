@@ -1,0 +1,576 @@
+---
+title: 똘똘한 집 한 채 시각화
+author: 박재성
+date: "`r format(Sys.time(), '%Y년 %m월 %d일')`"
+bibliography: mybib.bib
+# csl: "`r here::here('/Users/JaesungJamesPark/Dropbox/settings/Rmd/RmdSetting', 'apa.csl')`"
+documentclass: oblivoir
+classoption:
+- 11pt
+- a4paper
+- footnote
+- amsmath
+- romanfixed
+- itemph
+mainfont: Minion Pro
+sansfont: Myriad Pro
+monofont: Optima
+mathfont: TeX Gyre Pagella Math
+mainhangulfont: Un Batang
+sanshangulfont: Un Dotum
+monohangulfont: 은 타자
+# output:
+#   word_document:
+#     reference_docx: /Users/JaesungJamesPark/Dropbox/settings/Rmd/우리바탕.docx
+output:
+  pdf_document:
+    number_sections: true
+    citation_package: natbib
+    latex_engine: xelatex
+    keep_tex: true
+    template: /Users/JaesungJamesPark/Dropbox/settings/Rmd/RmdSetting/my-template.tex
+    extra_dependencies: 
+      natbib: ["authoryear", "round", "longnamesfirst"]
+      chngcntr: null
+      float: null
+    includes:
+      in_header: /Users/JaesungJamesPark/Dropbox/settings/Rmd/RmdSetting/my-preamble.tex
+header-includes:
+- \usepackage{float}
+- \floatplacement{figure}{H}
+- \floatplacement{table}{H}
+- \usepackage{caption}
+- \usepackage{pdflscape}
+- \newcommand{\diff}{\mathrm{d}}
+- \newcommand{\E}{\mathrm{E}}
+- \newcommand{\Var}{\mathrm{Var}}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+- \usepackage{pdfpages}
+- \usepackage{fancyhdr}
+- \usepackage{tocloft}
+---
+
+```{r preambleRmarkdown, cache = FALSE, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+source("/Users/JaesungJamesPark/Dropbox/settings/settings_archived/preambleRmarkdown.r")
+wd.path = "."
+figs.path = paste0(wd.path, "/", "figs")
+data.path = paste0(wd.path, "/", "data")
+options(knitr.kable.NA = "")
+
+if (file.exists("mybib.bib") && file.size("mybib.bib") > 0) {
+  writeLines(remove.and(readLines("mybib.bib")), "mybib.bib")
+}
+
+font.h <- "WooriBatang" 
+library(showtext)
+font_add(font.h, "/Library/Fonts/hfonts/WooriBatang.ttf")
+showtext_auto()
+
+library(flextable)
+library(officer)
+conflicted::conflicts_prefer(
+  flextable::font,
+  flextable::bold,
+  flextable::align,
+  flextable::set_caption,
+  .quiet = TRUE
+)
+워드서식적용 <- function(dt, caption = NULL, footnotes = NULL) {
+  ft <- flextable(dt) %>%
+    align(align = "center", part = "all") %>%
+    border_remove() %>%
+    hline_top(border = fp_border(width = 1), part = "all") %>%
+    hline_bottom(border = fp_border(width = 1), part = "header") %>%
+    font(fontname = font.h, part = "all") %>%
+    fontsize(size = 10, part = "all")
+  
+  if (!is.null(caption)) {
+    ft <- set_caption(ft, caption)
+  }
+  
+  if (!is.null(footnotes) && length(footnotes) > 0) {
+    footnote_combined <- paste(footnotes, collapse = "\n")
+    ft <- ft %>%
+      hline_bottom(border = fp_border(width = 1), part = "body") %>%
+      add_footer_lines(values = footnote_combined) %>%
+      fontsize(size = 9, part = "footer") %>%
+      align(align = "left", part = "footer") %>%
+      font(fontname = font.h, part = "footer")
+  } else {
+    ft <- hline_bottom(ft, border = fp_border(width = 1), part = "body")
+  }
+  
+  ft <- add_footer_lines(ft, values = "")
+  
+  return(ft)
+}
+```
+
+
+```{r python_setup, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+library(reticulate)
+use_condaenv("작업환경", required = TRUE)
+```
+
+```{python, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+import sys
+sys.path.append('/Users/JaesungJamesPark/Dropbox/settings/python_modules')
+```
+
+
+```{python 부동산위계데이터, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE, eval = FALSE}
+# cd '/Users/JaesungJamesPark/Dropbox/works/2025/works/빅데이터핀테크/lectures/시각화와웹개발/works/wd_똘똘한집한채'
+# !conda install openpyxl
+import pandas as pd
+import numpy as np
+from collections import defaultdict
+
+def 위계구조생성(파일경로):
+    원본 = pd.read_excel(파일경로, header=None)
+    
+    # 헤더 정보 추출 (0-5행)
+    광역 = 원본.iloc[0, 2:].values
+    광역구분 = 원본.iloc[1, 2:].values
+    광역상세구분 = 원본.iloc[2, 2:].values
+    시군구 = 원본.iloc[3, 2:].values
+    자료형식 = 원본.iloc[5, 2:].values
+    
+    # 자료시점 추출 및 날짜 변환
+    자료시점원본 = 원본.iloc[6:, 1].values
+    자료시점 = pd.to_datetime(
+        pd.Series(자료시점원본).str.replace('년 ', '-').str.replace('월', ''),
+        format='%Y-%m'
+    )
+    
+    # 자료형식별 컬럼 인덱스
+    원자료컬럼 = [i for i in range(len(자료형식)) if 자료형식[i] == '원자료']
+    증감률컬럼 = [i for i in range(len(자료형식)) if 자료형식[i] == '전기대비증감률']
+    
+    # 위계적 딕셔너리 구조 생성
+    def 중첩딕셔너리():
+        return defaultdict(중첩딕셔너리)
+    
+    지역구조 = 중첩딕셔너리()
+    
+    # 원자료 처리
+    for idx in 원자료컬럼:
+        위계경로 = (광역[idx], 광역구분[idx], 광역상세구분[idx], 시군구[idx])
+        
+        현재노드 = 지역구조
+        for 레벨 in 위계경로:
+            현재노드 = 현재노드[레벨]
+        
+        데이터프레임 = pd.DataFrame({
+            '자료시점': 자료시점,
+            '값': 원본.iloc[6:, idx + 2].values
+        })
+        
+        현재노드['원자료'] = 데이터프레임
+    
+    # 증감률 처리
+    for idx in 증감률컬럼:
+        위계경로 = (광역[idx], 광역구분[idx], 광역상세구분[idx], 시군구[idx])
+        
+        현재노드 = 지역구조
+        for 레벨 in 위계경로:
+            현재노드 = 현재노드[레벨]
+        
+        데이터프레임 = pd.DataFrame({
+            '자료시점': 자료시점,
+            '값': 원본.iloc[6:, idx + 2].values
+        })
+        
+        현재노드['전기대비증감률'] = 데이터프레임
+    
+    return 딕셔너리변환(지역구조)
+
+def 딕셔너리변환(중첩딕):
+    if isinstance(중첩딕, defaultdict):
+        return {k: 딕셔너리변환(v) for k, v in 중첩딕.items()}
+    return 중첩딕
+
+def 지역데이터조회(위계구조, 광역=None, 광역구분=None, 광역상세구분=None, 시군구=None, 자료형식='원자료'):
+    결과 = 위계구조
+    
+    경로 = [광역, 광역구분, 광역상세구분, 시군구]
+    for 레벨 in 경로:
+        if 레벨 is not None:
+            결과 = 결과[레벨]
+        else:
+            break
+    
+    return 결과.get(자료형식)
+
+# 실행
+부동산위계 = 위계구조생성('data/(월) 매매가격지수_아파트.xlsx')
+
+import pickle
+with open('부동산위계.pkl', 'wb') as f:
+    pickle.dump(부동산위계, f)
+
+# 사용 예시
+전국원자료 = 지역데이터조회(부동산위계, '전국', '전국', '전국', '전국', '원자료')
+
+# 전국증감률 = 지역데이터조회(부동산위계, '전국', '전국', '전국', '전국', '전기대비증감률')
+```
+
+```{python 부동산위계호출, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+import pandas as pd
+import numpy as np
+from collections import defaultdict
+
+import pickle
+with open('부동산위계.pkl', 'rb') as f:
+    부동산위계 = pickle.load(f)
+```
+
+```{python 서울지역데이터추출, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+def 하위지역데이터추출(위계구조, 광역, 자료형식='원자료', 현재경로=[]):
+    결과목록 = []
+    
+    # 광역으로 먼저 이동
+    if not 현재경로:
+        if 광역 not in 위계구조:
+            return []
+        위계구조 = 위계구조[광역]
+        현재경로 = [광역]
+    
+    # 재귀적으로 탐색
+    for 키, 값 in 위계구조.items():
+        새경로 = 현재경로 + [키]
+        
+        # 최하위 노드 확인
+        if isinstance(값, dict) and 자료형식 in 값:
+            데이터 = 값[자료형식].copy()
+            데이터['광역'] = 새경로[0] if len(새경로) > 0 else None
+            데이터['광역구분'] = 새경로[1] if len(새경로) > 1 else None
+            데이터['광역상세구분'] = 새경로[2] if len(새경로) > 2 else None
+            데이터['시군구'] = 새경로[3] if len(새경로) > 3 else None
+            결과목록.append(데이터)
+        elif isinstance(값, dict):
+            # 하위 레벨 탐색
+            하위결과 = 하위지역데이터추출_재귀(값, 자료형식, 새경로)
+            결과목록.extend(하위결과)
+    
+    return 결과목록
+
+def 하위지역데이터추출_재귀(위계구조, 자료형식, 현재경로):
+    결과목록 = []
+    
+    for 키, 값 in 위계구조.items():
+        새경로 = 현재경로 + [키]
+        
+        if isinstance(값, dict) and 자료형식 in 값:
+            데이터 = 값[자료형식].copy()
+            데이터['광역'] = 새경로[0] if len(새경로) > 0 else None
+            데이터['광역구분'] = 새경로[1] if len(새경로) > 1 else None
+            데이터['광역상세구분'] = 새경로[2] if len(새경로) > 2 else None
+            데이터['시군구'] = 새경로[3] if len(새경로) > 3 else None
+            결과목록.append(데이터)
+        elif isinstance(값, dict):
+            하위결과 = 하위지역데이터추출_재귀(값, 자료형식, 새경로)
+            결과목록.extend(하위결과)
+    
+    return 결과목록
+
+# 사용 예시
+서울구별원자료 = 하위지역데이터추출(부동산위계, '서울', '원자료')
+서울구별통합 = pd.concat(서울구별원자료, ignore_index=True)
+
+# '서울' 전체 데이터 제외
+서울구별통합_clean = 서울구별통합.dropna(subset=['자료시점', '값'])
+# '구'로 끝나는 시군구만 선택
+서울구만 = 서울구별통합_clean[서울구별통합_clean['시군구'].str.endswith('구')]
+# 서울구만 = 서울구별통합_clean[서울구별통합_clean['시군구'].str.contains('구$', regex=True)]
+
+# import pickle
+# with open('서울구만.pkl', 'wb') as f:
+#     pickle.dump(서울구만, f)
+# 서울구만.to_parquet('서울구만.parquet', index=False)
+```
+
+```{python 구별변동률, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+# dec 함수 정의
+def dec(x, nsmall=2, big_mark=","):
+    if pd.isna(x):
+        return ""
+    rounded = round(x, nsmall)
+    formatted = f"{rounded:,.{nsmall}f}".replace(",", big_mark)
+    return formatted
+
+# 2023년 1월 기준 변동률 계산
+기준시점 = pd.Timestamp('2023-01-01')
+서울구만_sorted = 서울구만.sort_values(['시군구', '자료시점'])
+
+# 각 구별로 2023년 1월 값과 최근 값 추출
+구별변동률 = []
+for 구 in 서울구만_sorted['시군구'].unique():
+    구데이터 = 서울구만_sorted[서울구만_sorted['시군구'] == 구].copy()
+    
+    # 2023년 1월 데이터
+    기준데이터 = 구데이터[구데이터['자료시점'] == 기준시점]
+    if len(기준데이터) == 0:
+        continue
+    기준값 = 기준데이터['값'].iloc[0]
+    
+    # 최근 데이터
+    최근데이터 = 구데이터.iloc[-1]
+    최근값 = 최근데이터['값']
+    최근시점 = 최근데이터['자료시점']
+    
+    # 변동률 계산
+    변동률 = ((최근값 - 기준값) / 기준값) * 100
+    
+    구별변동률.append({
+        '시군구': 구,
+        '기준값': 기준값,
+        '최근값': 최근값,
+        '최근시점': 최근시점,
+        '변동률': 변동률
+    })
+
+구별변동률df = pd.DataFrame(구별변동률)
+구별변동률df_sorted = 구별변동률df.sort_values('변동률', ascending=False)
+
+# 상위 지역과 하위 지역 추출
+상위3개 = 구별변동률df_sorted.head(3)
+하위3개 = 구별변동률df_sorted.tail(3)
+
+상위지역명 = ', '.join(상위3개['시군구'].tolist())
+상위변동률_최대 = 상위3개['변동률'].max()
+상위변동률_최소 = 상위3개['변동률'].min()
+
+하위지역명 = ', '.join(하위3개['시군구'].tolist())
+하위변동률_최대 = 하위3개['변동률'].max()
+하위변동률_최소 = 하위3개['변동률'].min()
+
+# 인라인 청크용 포맷된 변수 생성
+데이터시작 = 서울구만['자료시점'].min()
+데이터끝 = 서울구만['자료시점'].max()
+데이터시작_문자열 = 데이터시작.strftime('%Y년 %m월')
+데이터끝_문자열 = 데이터끝.strftime('%Y년 %m월')
+상위변동률_최소_문자열 = dec(상위변동률_최소, 1)
+상위변동률_최대_문자열 = dec(상위변동률_최대, 1)
+하위변동률_최소_문자열 = dec(하위변동률_최소, 1)
+하위변동률_최대_문자열 = dec(하위변동률_최대, 1)
+```
+
+그림은 한국 부동산원(<https://www.reb.or.kr/r-one/portal/main/indexPage.do>)이 제공한 서울 지역의 아파트 매매가격 지수를 시각화한 것이다. 이 지수는 각 지역별로 2025년 3월의 매매가격을 100으로 설정하여 `r py$데이터시작_문자열`부터 `r py$데이터끝_문자열`까지 시계열의 변동을 상대적으로 나타낸다. 그림에서 보듯 2023년 1월 이후 최근까지 `r py$상위지역명` 등은 기준시점 대비 아파트 매매가격이 `r py$상위변동률_최소_문자열` - `r py$상위변동률_최대_문자열`% 급등하였다. 반면 `r py$하위지역명` 등은 기준시점 대비 아파트 매매가격이 `r py$하위변동률_최소_문자열` - `r py$하위변동률_최대_문자열`%에서 변동하는 데 그치고 있다.
+
+```{r 출력형식제어, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+output_format = if (knitr::is_latex_output()) "pdf" else "png"
+```
+
+```{python 서울지역변동그림, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE, fig.show = "hide"}
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+plt.ioff()
+
+font_path = '/Library/Fonts/hfonts/WooriBatang.ttf'
+font_prop = fm.FontProperties(fname=font_path)
+fm.fontManager.addfont(font_path)
+font_name = font_prop.get_name()
+
+plt.rcParams['font.family'] = font_name
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['pdf.fonttype'] = 42
+
+plt.close('all')
+
+구목록 = 서울구만['시군구'].unique()
+구개수 = len(구목록)
+
+ncols = 5
+nrows = (구개수 + ncols - 1) // ncols
+
+fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, nrows * 2.5), 
+                          sharex=True, sharey=True)
+axes = axes.flatten()
+
+하이라이트시작 = pd.Timestamp('2023-01-01')
+
+for i, 구명 in enumerate(구목록):
+    ax = axes[i]
+    구데이터 = 서울구만[서울구만['시군구'] == 구명]
+    
+    ax.plot(구데이터['자료시점'], 구데이터['값'], linewidth=1.5, color='#1f77b4')
+    ax.set_title(구명, fontproperties=font_prop, fontsize=11)
+    ax.axvspan(하이라이트시작, 데이터끝, alpha=0.2, color='gray')
+    ax.set_ylim(35, 125)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=9)
+
+for j in range(i + 1, len(axes)):
+    axes[j].set_visible(False)
+
+fig.text(0.5, 0.02, '자료시점', ha='center', fontsize=12, fontproperties=font_prop)
+fig.text(0.02, 0.5, '매매가격지수', va='center', rotation='vertical', fontsize=12, fontproperties=font_prop)
+
+plt.tight_layout()
+plt.subplots_adjust(bottom=0.06, left=0.05)
+
+# R 변수 접근 (영문 변수명 필수)
+output_fmt = r.output_format
+if output_fmt == "pdf":
+    fig.savefig('figs/서울구별매매가격지수.pdf', bbox_inches='tight', facecolor='white')
+else:
+    fig.savefig('figs/서울구별매매가격지수.png', dpi=150, bbox_inches='tight', facecolor='white')
+
+plt.close('all')
+```
+
+```{r "서울지역변동그림불러오기", echo = FALSE, warning = FALSE, fig.cap = "서울 구별 아파트 매매가격 변동", out.width = "100%"}
+그림경로 <- paste0("figs/서울구별매매가격지수.", output_format)
+knitr::include_graphics(그림경로)
+```
+
+```{python 서울지도데이터, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+# 지도데이터 출처
+# https://gimi9.com/dataset/vworld_open_30604/
+
+import geopandas as gpd
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+# shapefile 불러오기
+shp_path = 'data/LARD_ADM_SECT_SGG_서울/LARD_ADM_SECT_SGG_11_202601.shp'
+서울지도 = gpd.read_file(shp_path, encoding='cp949')
+
+# "서울시" 접두어 제거 및 공백 제거
+서울지도['SGG_NM'] = (서울지도['SGG_NM']
+                      .str.replace('^서울시', '', regex=True)
+                      .str.replace(' ', '', regex=False)
+                      .str.strip())
+
+# 구별변동률df의 시군구 컬럼도 공백 제거
+구별변동률df['시군구'] = (구별변동률df['시군구']
+                         .str.replace(' ', '', regex=False)
+                         .str.strip())
+```
+
+```{python 서울지도cartogram, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE, fig.cap = "서울 구별 아파트 매매가격 변동 2"}
+import matplotlib
+# matplotlib.use('Agg')
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+from matplotlib.patches import Circle
+from matplotlib.collections import PatchCollection
+import matplotlib.colors as mcolors
+
+# plt.ioff()
+
+font_path = '/Library/Fonts/hfonts/WooriBatang.ttf'
+font_prop = fm.FontProperties(fname=font_path)
+fm.fontManager.addfont(font_path)
+font_name = font_prop.get_name()
+
+plt.rcParams['font.family'] = font_name
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['pdf.fonttype'] = 42
+
+plt.close('all')
+
+# shapefile 불러오기
+서울지도_병합 = 서울지도.merge(구별변동률df, left_on='SGG_NM', right_on='시군구', how='left')
+
+서울지도_병합['centroid'] = 서울지도_병합.geometry.centroid
+서울지도_병합['cx'] = 서울지도_병합.centroid.x
+서울지도_병합['cy'] = 서울지도_병합.centroid.y
+
+변동률최소 = 구별변동률df['변동률'].min()
+변동률최대 = 구별변동률df['변동률'].max()
+
+서울지도_병합['변동률_shifted'] = 서울지도_병합['변동률'] - 변동률최소 + 5
+서울지도_병합['반지름'] = np.sqrt(서울지도_병합['변동률_shifted']) * 300
+
+norm = mcolors.TwoSlopeNorm(vmin=변동률최소, vcenter=0, vmax=변동률최대)
+cmap = plt.cm.RdYlBu_r
+
+# 위아래 배치 (2행 1열)
+fig, axes = plt.subplots(2, 1, figsize=(10, 16))
+
+# 위: 일반 choropleth
+ax1 = axes[0]
+서울지도_병합.plot(column='변동률', cmap=cmap, norm=norm, edgecolor='white', 
+                  linewidth=0.5, ax=ax1, legend=False)
+ax1.set_title('구별 매매가격 변동률 (2023.01 기준)', fontproperties=font_prop, fontsize=14)
+ax1.axis('off')
+
+for idx, row in 서울지도_병합.iterrows():
+    ax1.annotate(row['SGG_NM'], xy=(row['cx'], row['cy']), ha='center', va='center',
+                 fontproperties=font_prop, fontsize=8)
+
+# 아래: Dorling cartogram
+ax2 = axes[1]
+서울지도.plot(ax=ax2, facecolor='none', edgecolor='lightgray', linewidth=0.3)
+
+circles = []
+colors = []
+for idx, row in 서울지도_병합.iterrows():
+    if pd.notna(row['변동률']):
+        circle = Circle((row['cx'], row['cy']), row['반지름'])
+        circles.append(circle)
+        colors.append(row['변동률'])
+
+pc = PatchCollection(circles, cmap=cmap, norm=norm, edgecolor='white', linewidth=0.5)
+pc.set_array(np.array(colors))
+ax2.add_collection(pc)
+
+# 밝기 기반 글자 색상 결정 함수
+def 글자색상결정(변동률값, cmap, norm):
+    if pd.isna(변동률값):
+        return 'black'
+    rgba = cmap(norm(변동률값))
+    # 상대적 휘도 계산 (ITU-R BT.709)
+    휘도 = 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
+    return 'white' if 휘도 < 0.5 else 'black'
+
+# 위: choropleth 구 이름 표시
+for idx, row in 서울지도_병합.iterrows():
+    글자색 = 글자색상결정(row['변동률'], cmap, norm)
+    ax1.annotate(row['SGG_NM'], xy=(row['cx'], row['cy']), ha='center', va='center',
+                 fontproperties=font_prop, fontsize=8, color=글자색)
+
+# 아래: Dorling cartogram 구 이름 표시
+for idx, row in 서울지도_병합.iterrows():
+    if pd.notna(row['변동률']):
+        글자색 = 글자색상결정(row['변동률'], cmap, norm)
+        ax2.annotate(row['SGG_NM'], xy=(row['cx'], row['cy']), ha='center', va='center',
+                     fontproperties=font_prop, fontsize=7, color=글자색)
+
+ax2.set_title('Dorling Cartogram (면적 = 변동률)', fontproperties=font_prop, fontsize=14)
+ax2.axis('off')
+ax2.set_xlim(ax1.get_xlim())
+ax2.set_ylim(ax1.get_ylim())
+
+# 컬러바를 오른쪽에 수직 배치
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array([])
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+cbar = fig.colorbar(sm, cax=cbar_ax, orientation='vertical')
+cbar.set_label('변동률 (%)', fontproperties=font_prop, fontsize=11)
+
+plt.tight_layout(rect=[0, 0, 0.9, 1])  # 오른쪽 여백 확보
+
+output_fmt = r.output_format
+if output_fmt == "pdf":
+    fig.savefig('figs/서울카토그램.pdf', bbox_inches='tight', facecolor='white')
+else:
+    fig.savefig('figs/서울카토그램.png', dpi=150, bbox_inches='tight', facecolor='white')
+
+# plt.close('all')
+plt.show()
+```
+
+```{python, echo = FALSE, results = "hide", warning = FALSE, message = FALSE, error = FALSE}
+from env_mgnt import 환경저장
+환경저장('똘똘한집한채저장.pkl')
+```
