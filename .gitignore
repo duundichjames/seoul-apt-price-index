@@ -4,3 +4,4 @@
 !data/서울구만.parquet
 !data/
 !.gitignore
+!data/서울구경계.geojson

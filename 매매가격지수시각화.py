@@ -49,7 +49,7 @@ h1 {
 h2 {
     font-weight: 600 !important;
     letter-spacing: -0.01em;
-    margin-top: 3rem !important;
+    margin-top: 1rem !important;
 }
 
 .source-caption {
@@ -64,6 +64,47 @@ h2 {
     border: none;
     border-top: 1px solid rgba(128, 128, 128, 0.2);
     margin: 3rem 0 1rem 0;
+}
+
+.slide-nav {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+}
+
+.slide-nav a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 4px;
+    text-decoration: none !important;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+@media (prefers-color-scheme: light) {
+    .slide-nav a {
+        background: #e8e8e8;
+        color: #555 !important;
+    }
+    .slide-nav a:hover {
+        background: #d0d0d0;
+        color: #222 !important;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .slide-nav a {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.6) !important;
+    }
+    .slide-nav a:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.9) !important;
+    }
 }
 </style>""", unsafe_allow_html=True)
 
@@ -88,6 +129,23 @@ COLOR_GRID = 'rgba(128, 128, 128, 0.12)'
     '강서구', '구로구', '금천구', '영등포구', '동작구',
     '관악구', '서초구', '강남구', '송파구', '강동구',
 ]
+
+슬라이드목록 = [
+    {"번호": 1, "id": "slide-1", "이름": "시계열"},
+    {"번호": 2, "id": "slide-2", "이름": "지도"},
+]
+
+
+# ═══════════════════════════════════════════════════════════
+# 슬라이드 네비게이션
+# ═══════════════════════════════════════════════════════════
+
+def 슬라이드네비게이션():
+    links = ''.join(
+        f'<a href="#{s["id"]}" title="{s["이름"]}">{s["번호"]}</a>'
+        for s in 슬라이드목록
+    )
+    return f'<div class="slide-nav">{links}</div>'
 
 
 # ═══════════════════════════════════════════════════════════
@@ -211,9 +269,7 @@ def 중심점사전생성(geojson):
     }
 
 
-def 글자색결정(변동률값, vmin, vmax):
-    """변동률 값에 따른 버블 배경색의 휘도를 계산하여 글자색을 결정한다."""
-    # RdYlBu_r 컬러맵 기준 (reversescale=True이므로 RdYlBu 원본 사용)
+def 버블색상계산(변동률값, vmin, vmax):
     cmap = mcolors.LinearSegmentedColormap.from_list(
         'rdylbu_r', ['#313695', '#4575b4', '#74add1', '#abd9e9',
                       '#e0f3f8', '#ffffbf', '#fee090', '#fdae61',
@@ -224,9 +280,16 @@ def 글자색결정(변동률값, vmin, vmax):
     else:
         norm_val = (변동률값 - vmin) / (vmax - vmin)
     norm_val = max(0, min(1, norm_val))
-    rgba = cmap(norm_val)
-    휘도 = 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
-    return 'rgba(30, 30, 30, 0.9)' if 휘도 > 0.55 else 'rgba(255, 255, 255, 0.95)'
+    return cmap(norm_val)
+
+
+def 글자색결정(rgba_tuple):
+    휘도 = 0.2126 * rgba_tuple[0] + 0.7152 * rgba_tuple[1] + 0.0722 * rgba_tuple[2]
+    return 'rgba(30, 30, 30, 0.9)' if 휘도 > 0.5 else 'rgba(255, 255, 255, 0.95)'
+
+
+# 버블 안에 텍스트를 넣을 수 있는 최소 크기 (픽셀)
+버블텍스트기준 = 35
 
 
 def 지도차트생성(서울구만, 서울geojson, 선택시점):
@@ -250,8 +313,8 @@ def 지도차트생성(서울구만, 서울geojson, 선택시점):
     vmin = 변동률dt['변동률'].min()
     vmax = 변동률dt['변동률'].max()
 
-    # 구별 글자색 결정
-    변동률dt['글자색'] = 변동률dt['변동률'].apply(lambda v: 글자색결정(v, vmin, vmax))
+    변동률dt['버블rgba'] = 변동률dt['변동률'].apply(lambda v: 버블색상계산(v, vmin, vmax))
+    변동률dt['글자색'] = 변동률dt['버블rgba'].apply(글자색결정)
 
     fig = go.Figure()
 
@@ -275,7 +338,7 @@ def 지도차트생성(서울구만, 서울geojson, 선택시점):
             color=변동률dt['변동률'],
             colorscale='RdYlBu',
             reversescale=True,
-            cmid=0,
+            cmin=0,
             colorbar=dict(
                 title=dict(text='변동률 (%)', font=dict(family=FONT, size=11)),
                 tickfont=dict(family=FONT, size=10),
@@ -301,16 +364,26 @@ def 지도차트생성(서울구만, 서울geojson, 선택시점):
         showlegend=False,
     ))
 
-    # 3) 구 이름 — 글자색을 버블 배경에 맞춰 동적 지정
+    # 3) 구 이름
+    #    큰 버블 → 버블 안, 색상 기반 글자색
+    #    작은 버블 → 버블 위, 밝은 회색 글자
+    y_range = 변동률dt['lat'].max() - 변동률dt['lat'].min()
+    오프셋 = y_range * 0.022
+
     for _, row in 변동률dt.iterrows():
+        작은버블 = row['버블크기'] < 버블텍스트기준
         fig.add_annotation(
             x=row['lon'],
-            y=row['lat'],
+            y=row['lat'] + (오프셋 if 작은버블 else 0),
             text=row['시군구'],
             showarrow=False,
-            font=dict(family=FONT, size=10, color=row['글자색']),
+            font=dict(
+                family=FONT,
+                size=10 if not 작은버블 else 9,
+                color=row['글자색'] if not 작은버블 else 'rgba(210, 210, 210, 0.85)',
+            ),
             xanchor='center',
-            yanchor='middle',
+            yanchor='bottom' if 작은버블 else 'middle',
         )
 
     fig.update_layout(
@@ -335,8 +408,6 @@ def 지도차트생성(서울구만, 서울geojson, 선택시점):
 # 메인 앱
 # ═══════════════════════════════════════════════════════════
 
-# ── 데이터 로딩 ──
-
 서울구만 = load_data()
 
 서울geojson = None
@@ -353,6 +424,9 @@ except FileNotFoundError:
 # ═══════════════════════════════════════════════════════════
 # 1장. 시계열
 # ═══════════════════════════════════════════════════════════
+
+st.markdown(f'<div id="slide-1"></div>', unsafe_allow_html=True)
+st.markdown(슬라이드네비게이션(), unsafe_allow_html=True)
 
 st.markdown(
     '<h1 style="margin-bottom:0.1rem;">서울 구별 아파트 매매가격지수: 2023년 이후 무슨 일??</h1>',
@@ -391,7 +465,7 @@ st.plotly_chart(
 )
 
 st.markdown(
-    '<p class="source-caption">자료, 한국부동산원 (2025.03 = 100)</p>',
+    '<p class="source-caption">출처: 한국부동산원 (2025.03 = 100)</p>',
     unsafe_allow_html=True,
 )
 
@@ -402,10 +476,12 @@ st.markdown(
 
 if 서울geojson and after_2023:
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown(f'<div id="slide-2"></div>', unsafe_allow_html=True)
+    st.markdown(슬라이드네비게이션(), unsafe_allow_html=True)
 
     시점문자열 = 선택시점.strftime('%Y년 %m월')
     st.markdown(
-        f'<h2 style="margin-bottom:0.2rem;">2023년 1월 기준 구별 상승률: 뛰는 곳과 기는 곳</h2>',
+        f'<h2 style="margin-bottom:0.2rem;">2023년 1월 대비 구별 상승률: 뛰는 곳과 기는 곳</h2>',
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -431,6 +507,6 @@ if 서울geojson and after_2023:
         )
 
     st.markdown(
-        '<p class="source-caption">자료, 한국부동산원 (2025.03 = 100)</p>',
+        '<p class="source-caption">출처: 한국부동산원 (2025.03 = 100)</p>',
         unsafe_allow_html=True,
     )
