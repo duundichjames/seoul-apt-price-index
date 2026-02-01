@@ -83,7 +83,7 @@ COLOR_GRID = 'rgba(128, 128, 128, 0.12)'
 # 데이터 로딩
 # ═══════════════════════════════════════════════════════════
 
-DATA_PATH = '서울구만.parquet'
+DATA_PATH = 'data/서울구만.parquet'
 
 @st.cache_data
 def load_data():
